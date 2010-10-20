@@ -2,8 +2,8 @@ package = "webrocks"
 version = "2.0-1"
 
 source = {
-  --url = "filehttp://mysite.mweb.co.za/residents/sdonovan/lua/webrocks-1.0.tgz"
-  url = "file://c:/webrocks"
+  url = "http://download.github.com/stevedonovan-Webrocks-v2.0-0-gb653b0d.zip",
+  dir = "stevedonovan-Webrocks-735b6f8"
 }
 
 description = {
