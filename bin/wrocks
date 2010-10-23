@@ -32,7 +32,7 @@
     - only works with http repositories
     - currently only works with the first rock repository; not possible to span several
 
-  Steve Donovan and Ignacio Burgueño, 2009-2010, MIT/X11
+  Steve Donovan and Ignacio Burgueno, 2009-2010, MIT/X11
 
   Uses:
   Web server v0.1
@@ -40,41 +40,69 @@
 
 --]]
 
+if arg[1] == '--help' then
+    print [[
+LuaRocks Web Interface, Version 2.0
+    (don't run with sudo - browsers don't like this!)
+    --nolaunch  don't start browser automatically
+    --addr=IP address (default localhost)
+    --port= HTTP port (default 8080)
+    --local  work with the local tree only
+    --from=another rocks repo
+    --only-from=another rocks repo; only search this for rocks!
+    --refresh reload the index from the rocks repo
+]]
+    return
+end
+
+
 local append = table.insert
 
 local cfg = require 'luarocks.cfg'
 local fs = require 'luarocks.fs'
 local req = require 'luarocks.require'
 local dir = require 'luarocks.dir'
+local util = require 'luarocks.util'
+
+local args,flags
+flags,args = util.parse_flags(...)
+local addr = flags['addr'] or 'localhost'
+local port = flags['port'] or '8080'
+local rocks_server = flags['from'] or flags['only-from']
+local URL = 'http://'..addr..':'..port
+local from_flags = (flags['from'] and 'from') or (flags['only-from'] and 'only-from')
+from_flags = from_flags and (' --'..from_flags..'='..rocks_server) or ''
+
+local DIRSEP = package.config:sub(1,1)
+local Windows = DIRSEP == '\\'
+-- we want the local per-user configuration directory
+local rocks_command =  'luarocks '
+local root
+if Windows then
+    root = cfg.home..DIRSEP
+else
+    root = dir.path(cfg.home,'.luarocks')..DIRSEP
+    if not flags['local'] then
+        rocks_command = 'sudo '..rocks_command
+    else
+        from_flags = from_flags .. ' --local '
+    end
+end
 
 -- we need LuaSocket to get the ball rolling here
 local stat,socket = pcall(require,'socket')
 if not stat then -- we need to grab luaSocket!
-    if os.execute ('luarocks install luasocket') == 0 then
+    if os.execute (rocks_command ..'install luasocket') == 0 then
         -- restart this script
         os.execute (arg[-1]..' '..arg[0])
     end
     return
 end
 
-local DIRSEP = package.config:sub(1,1)
-local Windows = DIRSEP == '\\'
---local root = cfg.variables.LUAROCKS_PREFIX..DIRSEP..'bin'..DIRSEP
--- we want the local per-user configuration directory
-local root
-if Windows then
-    root = cfg.home..DIRSEP
-else
-    root = dir.path(cfg.home,'.luarocks')..DIRSEP
-end
-
-
 -- capture where we are in order to load the resource files
 -- assumes that this script sits in $PATH/bin; we want $PATH
 local install_directory = debug.getinfo(1, "S").source
-print(install_directory)
 install_directory = install_directory:match("@(.+)[\\/].+[\\/]") --  ?
-print(install_directory)
 install_directory = install_directory:gsub("[\\/]", DIRSEP)
 
 local function readfile (f)
@@ -93,21 +121,10 @@ local function writefile (f,s)
 	return #s
 end
 
-local function get_installed_rocks ()
-	local installed = {}
-	local f = io.popen('luarocks list')
-	for line in f:lines() do
-		if line:find('^%S+$') and not line:find('^%-%-') then
-			installed[line] = true
-		end
-	end
-	f:close()
-	return installed
-end
 
 local installed_style = [[
 td.installed {
-   background-color: #d0d0f0;
+   background-color: #d0f0d0;
    vertical-align: top;
    text-align: left;
    padding: 5px;
@@ -128,6 +145,13 @@ a.remove {
 }
 ]]
 
+-- This jQuery script makes our 'install' actions into Ajax requests. It installs a
+-- little animated icon next to the install link. On the response, it first removes
+-- the icon and if successful changes the colour of the right-hand box by setting
+-- the 'installed' class.  Otherwise pops up the error dialog.
+
+-- $(document).ready(function() {
+
 local installed_script = [[
 <link href="/jqModal.css" rel="stylesheet" type="text/css" />
 <link rel="icon" href="/favicon.ico" type="image/x-icon">
@@ -137,7 +161,7 @@ local installed_script = [[
 <script type="text/javascript" src="/jqModal.js"></script>
 
 <script type="text/javascript">
-$(document).ready(function() {
+$(window).load(function() {
 	$(document.body).append("<div id='modalDialog' class='jqmWindow'><a href='#' class='jqmClose'>Close</a><hr><div id='modalDialogInsertion'></div></div>");
 	$("#modalDialog").jqm();
 	$("a.install").click(function(el) {
@@ -186,38 +210,46 @@ local function href (title,url,class)
     return '<a href="'..url..'" class="' .. (class or "") .. '">'..title..'</a>'
 end
 
-local index_name = 'rocks_index.html'
+local index_name
 
 local function get_index (force)
+    if not rocks_server then
+        rocks_server = cfg.rocks_servers[1]
+    else
+        not_default_server = true
+    end
+    if not index_name then
+        index_name = rocks_server:gsub('%W','_')..'_rocks_index.html'
+    end
 	local doc_index = root..index_name
-	local server = cfg.rocks_servers[1]
     -- luasocket download has slightly different sematics;
     -- may _not_ pass it an absolute path
 	if not fs.exists (doc_index) or force then
         fs.change_dir(root)
-		assert(fs.download(server..'/index.html',index_name))
+		if not fs.download(rocks_server..'/index.html',index_name) then
+            print (' ***** downloading index from '..rocks_server..' failed ****')
+            os.exit(1)
+        end
         fs.pop_dir()
 	end
-    print(doc_index)
 	local index = readfile (doc_index)
 	-- ensure that the relative links to rockspecs and rocks are absolute!
 	index = index:gsub('href="([^"]+)"',function(ref)
 		if not ref:find '^http://' then
-			ref = server..'/'..ref
+			ref = rocks_server..'/'..ref
 		end
 		return 'href="'..ref..'"'
 	end)
 
 	-- patch the first line to give us a refresh option...
-	index = index:gsub('Lua modules avaliable from this location',
-		'Lua modules avaliable from '..server..' '..href('(refresh)','_refresh'),
+	index,cnt = index:gsub('Lua modules available from this location',
+		'Lua modules avaliable from '..rocks_server..' '..href('(refresh)','_refresh'),
 		1)
-
+    -- and insert our jQuery scripts
 	index = index:gsub("</head>", installed_script .. "</head>")
 
 	return index
 end
-
 
 local function process_index (contents,installed)
 	local modules,module_set = {},{}
@@ -254,23 +286,41 @@ local function process_index (contents,installed)
 	return contents,modules,module_set
 end
 
-local ERROR_PAGESIZE = 20
+local ERROR_PAGESIZE = 15
 
 local function htmlify (file,lcount)
 	local out = {}
 	append(out,'<h1>Lua Rocks Error</h1><p>')
-    -- the issue here is that it is easy to overfill the error box, so we 'tail' the log file
-    local k,kstart = 1,0
-    if lcount > ERROR_PAGESIZE then kstart = lcount - ERROR_PAGESIZE end
-	for line in io.lines(file) do
-        if k > kstart then
-            line = line .. '<br>'
-            append(out,line)
+    if lcount then -- we have been given a file with its size in lines
+        -- the issue here is that it is easy to overfill the error box, so we 'tail' the log file
+        local k,kstart = 1,0
+        if lcount > ERROR_PAGESIZE then kstart = lcount - ERROR_PAGESIZE end
+        for line in io.lines(file) do
+            if k > kstart then
+                line = line .. '<br>'
+                append(out,line)
+            end
+            k = k + 1
         end
-        k = k + 1
-	end
+    else
+        append(out,file) -- just some string
+    end
 	append(out,'</p>')
 	return table.concat(out,'\n')
+end
+
+local function get_installed_rocks ()
+	local installed = {}
+    local cmd = rocks_command .. from_flags .. ' list'
+    print('installed rocks: '..cmd)
+	local f = io.popen(cmd)
+	for line in f:lines() do
+		if line:find('^%S+$') and not line:find('^%-%-') then
+			installed[line] = true
+		end
+	end
+	f:close()
+	return installed
 end
 
 local installed,contents,index_contents,modules,module_set
@@ -287,23 +337,30 @@ local function force_refresh (mod)
 	if mod then mod = '#'..mod else mod = '' end
 	return ([[
 <html><head>
-<meta http-equiv="Refresh" content="0;url=http://localhost:8080/index.htmlMODULE">
+<meta http-equiv="Refresh" content="0;url=%s/index.html%s">
 </head>
 <body></body>
-</html>]]):gsub('MODULE',mod)
+</html>]]):format(URL,mod)
 end
 
 local function ajax_refresh (mod)
 	-- update index and force the browser to refresh, going back to the module.
 	refresh_contents()
 	if mod then mod = '#'..mod else mod = '' end
-	return ("http://localhost:8080/index.htmlMODULE"):gsub('MODULE',mod), "text/plain"
+	--return (URL.."MODULE"):gsub('MODULE',mod), "text/plain"
+    return URL..mod, 'text/plain'
 end
 
 local function run_rocks_command (cmd,mod)
-	local f = io.popen('luarocks '..cmd..' '..mod..' 2>&1')
+    if cmd == 'remove' and installed[mod] then
+        return 500,htmlify 'This package is not installed'
+    end
+    local cmdline = rocks_command ..cmd..from_flags..' '..mod
+    print('Running command:',cmdline)
+	local f = io.popen(cmdline..' 2>&1')
 	local logfile = root..mod..'-'..cmd..'-log.txt'
 	local log = io.open(logfile,'w')
+    print('logfile',logfile,log)
     local lcount = 1
 	for line in f:lines() do
 		print(line)
@@ -338,16 +395,11 @@ local function process_url (file)
 	end
 end
 
-
-index_contents = get_index()
-refresh_contents()
-
-
 ---- launch the browser ----
 
 
 local browsers = {
-     "google-chrome",
+     --"google-chrome",
      "firefox", "opera", "konqueror", "epiphany", "mozilla", "netscape"
 };
 
@@ -363,19 +415,25 @@ function launch_browser (url)
         -- OK, this should work if we're OS X...
 		if exec('/Applications/Safari.app/Contents/macOS/Safari') ~= 0 then
 			print 'could not automatically load browser.'
-			print 'Please point your browser to http://localhost:8080'
+			print ('Please point your browser to '..URL)
 		end
     end
 end
 
-if arg[1] ~= '-nolaunch' then
-	launch_browser('http://localhost:8080')
+--------- Let the Program Begin! -------------
+
+
+index_contents = get_index(flags['refresh'])
+refresh_contents()
+
+if not flags['nolaunch'] then
+	launch_browser(URL)
 end
 
 ----  A little web server, based on code by Samuel Saint-Pettersen ----
 
 -- print message to show web server is running
-print("LuaRocks Web Interface")
+print("LuaRocks Web Interface, version 2.0")
 print("Running...(log files are at "..root..")")
 
 local client
@@ -405,8 +463,8 @@ local filepat = '[%a%d_%-]+'
 local idpat = '/('..filepat..')'
 local docpat = '/('..filepat..'%.%l+)'
 
--- create TCP socket on localhost:8080
-local server = assert(socket.bind("localhost", 8080))
+-- create TCP socket on addr:port
+local server = assert(socket.bind(addr, tonumber(port)))
 -- loop while waiting for a user agent request
 while 1 do
 	-- wait for a connection
