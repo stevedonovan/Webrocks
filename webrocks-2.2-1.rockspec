@@ -2,8 +2,8 @@ package = "webrocks"
 version = "2.2-1"
 
 source = {
-  url = "http://download.github.com/stevedonovan-Webrocks-v2.2-0-g54c2748.tar.gz",
-  dir = "stevedonovan-Webrocks-54c2748"
+  url = "http://github.com/stevedonovan/Webrocks/tarball/v2.2.tar.gz",
+  dir = "stevedonovan-Webrocks-5f0d442"
 }
 
 description = {
