@@ -52,6 +52,7 @@ LuaRocks Web Interface, Version 2.0
     --only-from=another rocks repo; only search this for rocks!
     --refresh reload the index from the rocks repo
     --browser=specific browser
+    --nocheck don't attempt to classify packages as local or global
 ]]
     return
 end
@@ -74,21 +75,22 @@ local URL = 'http://'..addr..':'..port
 local from_flags = (flags['from'] and 'from') or (flags['only-from'] and 'only-from')
 from_flags = from_flags and (' --'..from_flags..'='..rocks_server) or ''
 local browser = flags['browser']
+local run_local = flags['local']
+local check_version = not flags['nocheck']
 
 local DIRSEP = package.config:sub(1,1)
 local Windows = DIRSEP == '\\'
 -- we want the local per-user configuration directory
 local rocks_command =  'luarocks '
-local root
-if Windows then
-    root = cfg.home..DIRSEP
+local root = dir.path(cfg.home,'.luarocks')
+if not fs.exists(root) then
+    fs.make_dir(root)
+end
+root = root..DIRSEP
+if not run_local then
+    rocks_command = 'sudo '..rocks_command
 else
-    root = dir.path(cfg.home,'.luarocks')..DIRSEP
-    if not flags['local'] then
-        rocks_command = 'sudo '..rocks_command
-    else
-        from_flags = from_flags .. ' --local '
-    end
+    from_flags = from_flags .. ' --local '
 end
 
 -- we need LuaSocket to get the ball rolling here
@@ -244,8 +246,9 @@ local function get_index (force)
 	end)
 
 	-- patch the first line to give us a refresh option...
+    local dest = run_local and ' locally' or ' globally'
 	index,cnt = index:gsub('Lua modules available from this location',
-		'Lua modules avaliable from '..rocks_server..' '..href('(refresh)','_refresh'),
+		'Lua modules avaliable from '..rocks_server..' '..href('(refresh)','_refresh')..' installed'..dest,
 		1)
     -- and insert our jQuery scripts
 	index = index:gsub("</head>", installed_script .. "</head>")
@@ -311,15 +314,48 @@ local function htmlify (file,lcount)
 	return table.concat(out,'\n')
 end
 
+-- this parses the output of luarocks list, being careful to note whether we
+-- are working locally or globally.
 local function get_installed_rocks ()
 	local installed = {}
+    local package
+    -- assuming a canonical situation here where there is the local and the system
+    -- or 'global' tree (certainly not true for LfW!)
+    -- Still have to handle the case where there are more trees (wd interact with --to flag)
+    local trees = cfg.rocks_trees
+    local ltree,gtree = trees[1],trees[2]
+    check_version = check_version and type(ltree)=='string' and type(gtree)=='string'
     local cmd = rocks_command .. from_flags .. ' list'
     print('installed rocks: '..cmd)
 	local f = io.popen(cmd)
-	for line in f:lines() do
+    local line = f:read()
+	while line do
 		if line:find('^%S+$') and not line:find('^%-%-') then
-			installed[line] = true
+            package = line
+            if not check_version then
+                installed[package] = true
+            else
+                while true do
+                    line = f:read()
+                    if line:match '^%s*$' then break end
+                    local  vs, repo = line:match '%s+(%S+) %S+%s+%-%s+(%S+)'
+                    if run_local then
+                        if repo:match (ltree) then
+                            installed[package] = vs
+                            print('local',package,vs)
+                            break
+                        end
+                    else
+                        if repo:match (gtree) then
+                            installed[package] = vs
+                            print('root',package,vs)
+                            break
+                        end
+                    end
+                end
+            end
 		end
+        line = f:read()
 	end
 	f:close()
 	return installed
@@ -357,6 +393,8 @@ local function run_rocks_command (cmd,mod)
     if cmd == 'remove' and installed[mod] then
         return 500,htmlify 'This package is not installed'
     end
+    local lr_flags = from_flags
+    if run_local then lr_flags = lr_flags..' '..'--local' end
     local cmdline = rocks_command ..cmd..from_flags..' '..mod
     print('Running command:',cmdline)
 	local f = io.popen(cmdline..' 2>&1')
