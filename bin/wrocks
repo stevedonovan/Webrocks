@@ -52,6 +52,7 @@ LuaRocks Web Interface, Version 2.0
     --only-from=another rocks repo; only search this for rocks!
     --refresh reload the index from the rocks repo
     --browser=specific browser
+    --luarocks=path to another instance of luarocks script
     --nocheck don't attempt to classify packages as local or global
 ]]
     return
@@ -81,8 +82,9 @@ local check_version = not flags['nocheck']
 local DIRSEP = package.config:sub(1,1)
 local Windows = DIRSEP == '\\'
 -- we want the local per-user configuration directory
-local rocks_command =  'luarocks '
+local rocks_command =  flags['luarocks'] or 'luarocks '
 local root = dir.path(cfg.home,'.luarocks')
+--- always use ~/.luarocks - create if necessary.
 if not fs.exists(root) then
     fs.make_dir(root)
 end
