@@ -51,6 +51,7 @@ LuaRocks Web Interface, Version 2.0
     --from=another rocks repo
     --only-from=another rocks repo; only search this for rocks!
     --refresh reload the index from the rocks repo
+    --browser=specific browser
 ]]
     return
 end
@@ -72,6 +73,7 @@ local rocks_server = flags['from'] or flags['only-from']
 local URL = 'http://'..addr..':'..port
 local from_flags = (flags['from'] and 'from') or (flags['only-from'] and 'only-from')
 from_flags = from_flags and (' --'..from_flags..'='..rocks_server) or ''
+local browser = flags['browser']
 
 local DIRSEP = package.config:sub(1,1)
 local Windows = DIRSEP == '\\'
@@ -399,13 +401,19 @@ end
 
 
 local browsers = {
-     --"google-chrome",
+     "gnome-open","xdg-open","x-www-browser",
      "firefox", "opera", "konqueror", "epiphany", "mozilla", "netscape"
-};
-
+}
 
 function launch_browser (url)
     local exec = os.execute
+    if browser then
+        if exec(browser..' '..url..'&') ~= 0 then
+            print ("bad browser: "..browser)
+            print ('Please point your browser to '..URL)
+            return
+        end
+    end
     if Windows then
         exec('rundll32 url.dll,FileProtocolHandler '..url)
     else
