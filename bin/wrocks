@@ -89,11 +89,14 @@ if not fs.exists(root) then
     fs.make_dir(root)
 end
 root = root..DIRSEP
-if not run_local then
-    rocks_command = 'sudo '..rocks_command
-else
-    from_flags = from_flags .. ' --local '
+if not Windows then 
+    if not run_local then
+        rocks_command = 'sudo '..rocks_command
+    else
+        from_flags = from_flags .. ' --local '
+    end
 end
+-- may have to be in admin console for Windows with LfW...
 
 -- we need LuaSocket to get the ball rolling here
 local stat,socket = pcall(require,'socket')
