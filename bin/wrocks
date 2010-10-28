@@ -64,7 +64,8 @@ local append = table.insert
 local cfg = require 'luarocks.cfg'
 local fs = require 'luarocks.fs'
 local req = require 'luarocks.require'
-local dir = require 'luarocks.dir'
+-- this doesn't appear in LR 1, and we don't really need it
+--local dir = require 'luarocks.dir'
 local util = require 'luarocks.util'
 
 local args,flags
@@ -83,16 +84,28 @@ local DIRSEP = package.config:sub(1,1)
 local Windows = DIRSEP == '\\'
 -- we want the local per-user configuration directory
 local rocks_command =  flags['luarocks'] or 'luarocks '
-local root = dir.path(cfg.home,'.luarocks')
---- always use ~/.luarocks - create if necessary.
+--local root = dir.path(cfg.home,'.luarocks')
+local root = cfg.home..DIRSEP..'.luarocks'
+--- always use ~/.luarocks - create if necessary. Has a well-defined behaviour on Windows
 if not fs.exists(root) then
     fs.make_dir(root)
 end
 root = root..DIRSEP
+
+-- right, let's see if we're still running LR 1
+local f = io.popen(rocks_command..' --version')
+if not f then
+    print('bad luarocks! '..rocks_command)
+    os.exit(1)
+end
+local line = f:read()
+local version = line:match '(%d+)%.'
+version = tonumber(version)
+
 if not Windows then 
-    if not run_local then
+    if not run_local and version >= 2 then
         rocks_command = 'sudo '..rocks_command
-    else
+    elseif run_local then
         from_flags = from_flags .. ' --local '
     end
 end
