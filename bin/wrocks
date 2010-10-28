@@ -94,11 +94,12 @@ root = root..DIRSEP
 
 -- right, let's see if we're still running LR 1
 local f = io.popen(rocks_command..' --version')
-if not f then
+local line
+if f then line = f:read() end
+if not f or not line then
     print('bad luarocks! '..rocks_command)
     os.exit(1)
 end
-local line = f:read()
 local version = line:match '(%d+)%.'
 version = tonumber(version)
 
