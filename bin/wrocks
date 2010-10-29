@@ -474,14 +474,20 @@ function launch_browser (url)
     if Windows then
         exec('rundll32 url.dll,FileProtocolHandler '..url)
     else
-        for _,p in ipairs(browsers) do
-            if exec(p..' '..url..'&') == 0 then return end
+        local f = io.popen 'uname -s'
+        local line = f:read()
+        f:close()
+        if line ~= 'Darwin' then
+            for _,p in ipairs(browsers) do
+                if exec(p..' '..url..'&') == 0 then return end
+            end
+        else
+            -- OK, this should work if we're OS X...
+            if exec('open '..url..'&') ~= 0 then
+                print 'could not automatically load browser.'
+                print ('Please point your browser to '..url)
+            end
         end
-        -- OK, this should work if we're OS X...
-		if exec('/Applications/Safari.app/Contents/macOS/Safari') ~= 0 then
-			print 'could not automatically load browser.'
-			print ('Please point your browser to '..URL)
-		end
     end
 end
 
